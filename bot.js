@@ -44,7 +44,7 @@ function orderPayload(o) {
       { name: 'Auszahlung für den Gesamtauftrag', value: money(amount(o.price, o.dk, o.bonus).total), inline: true },
       { name: 'Status', value: o.cancelled ? 'Geschlossen' : open ? '🟢 Verfügbar' : 'Vollständig vergeben' },
       { name: 'Auftrags ID', value: o.id })
-    .setFooter({ text: `${o.source} • Preis für diesen Auftrag fest • ${o.partial ? 'Teilmengen erlaubt' : 'Nur Gesamtmenge'} • Auszahlung nach Prüfung` });
+    ;
   return { embeds: [embed], components: [row(button(`take:${o.id}`, '🌾 Auftrag annehmen', ButtonStyle.Success).setDisabled(o.cancelled || !open))], allowedMentions: { parse: [] } };
 }
 let syncing = false;
