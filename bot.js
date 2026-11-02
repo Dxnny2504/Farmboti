@@ -1,4 +1,4 @@
-import { Client, GatewayIntentBits, Events, MessageFlags, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle, escapeMarkdown } from 'discord.js';
+import { Client, GatewayIntentBits, Events, MessageFlags, PermissionFlagsBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle, escapeMarkdown } from 'discord.js';
 import { createServer } from 'node:http';
 import { Store, cents, remaining, amount } from './store.js';
 import { lookup } from './prices.js';
@@ -29,7 +29,7 @@ const commands = [
   { name: 'meine', description: 'Eigene Reservierungen und Auszahlungen ansehen' },
   { name: 'pruefen', description: 'Lieferungen und offene Auszahlungen prüfen · nur Shopteam' },
   { name: 'stornieren', description: 'Auftrag ohne aktive Reservierungen schließen · nur Shopteam', options: [option('id', 'Vollständige Auftrags ID aus dem Auftrag', 3, true)] }
-].map(c => ({ ...c, dm_permission: false }));
+].map(c => ({ ...c, dm_permission: false, default_member_permissions: ['auftrag', 'panel', 'pruefen', 'stornieren'].includes(c.name) ? '0' : null }));
 
 function orderPayload(o) {
   const open = remaining(o), total = o.dk * o.price;
@@ -97,7 +97,7 @@ client.on(Events.InteractionCreate, async i => {
     if (i.guildId !== env.GUILD_ID) return await privateReply(i, 'Dieser Bot ist für einen anderen Server eingerichtet.');
     // Fetch live roles: neither cached roles nor administrator permissions bypass the allowlist.
     const member = await i.guild.members.fetch({ user: i.user.id, force: true });
-    const team = managers.some(id => member.roles.cache.has(id));
+    const team = member.permissions.has(PermissionFlagsBits.Administrator);
     const farmer = !farmers.length || farmers.some(id => member.roles.cache.has(id));
     const parts = (i.customId || '').split(':');
     const action = i.isChatInputCommand() ? i.commandName : parts[0];
