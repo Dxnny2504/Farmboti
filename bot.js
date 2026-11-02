@@ -23,7 +23,7 @@ const commands = [
     option('item', 'Exakter Itemname oder Item ID im Preisrechner', 3, true, { max_length: 100 }),
     option('dk', 'Anzahl ganzer Doppelkisten', 4, true, { min_value: 1, max_value: 10000 }),
     option('preis', 'Optionaler Preis pro DK ohne Tausenderpunkte, z. B. 32346,00', 3),
-    option('aufwand', 'Aufwand in Prozent, Standard 10', 4, false, { min_value: 0, max_value: 100 }),
+    option('aufwand', 'Zusätzlicher Aufwand in Prozent, Standard 0', 4, false, { min_value: 0, max_value: 100 }),
     option('teilmengen', 'Teilmengen erlauben, Standard ja', 5),
     option('notiz', 'Abgabeort oder Hinweise', 3, false, { max_length: 500 }) ] },
   { name: 'panel', description: 'Bedienfenster im Farmerchannel veröffentlichen · nur Shopteam' },
@@ -105,7 +105,7 @@ client.on(Events.InteractionCreate, async i => {
     const staff = ['auftrag', 'panel', 'pruefen', 'stornieren', 'create', 'new', 'review', 'receive', 'confirm', 'pay'];
     if (staff.includes(action) && !team) return await privateReply(i, '🔒 Dafür brauchst du eine freigegebene Teamrolle.');
     if (['take', 'reserve'].includes(action) && !farmer) return await privateReply(i, 'Dafür brauchst du eine Farmerrolle.');
-    if (action === 'create') return await i.showModal(modal('new', 'Farmauftrag erstellen', [['item', 'Itemname oder Item ID', ''], ['dk', 'Ganze DK', '2'], ['preis', 'DK Preis (leer = Preisrechner)', '', false], ['bonus', 'Aufwand in Prozent', '10']]));
+    if (action === 'create') return await i.showModal(modal('new', 'Farmauftrag erstellen', [['item', 'Itemname oder Item ID', ''], ['dk', 'Ganze DK', '2'], ['preis', 'DK Preis (leer = Preisrechner)', '', false], ['bonus', 'Zusätzlicher Aufwand in Prozent', '0']]));
     if (action === 'take') {
       const o = store.get(parts[1]);
       if (o.cancelled || !remaining(o)) throw new Error('Auftrag ist nicht mehr verfügbar.');
@@ -129,7 +129,7 @@ client.on(Events.InteractionCreate, async i => {
       const item = (slash ? i.options.getString('item') : i.fields.getTextInputValue('item')).trim();
       const rawPrice = slash ? i.options.getString('preis') : i.fields.getTextInputValue('preis');
       const quote = rawPrice?.trim() ? { item, price: cents(rawPrice), source: 'Manuell' } : await lookup(env.PREISRECHNER_URL, item);
-      const o = store.create({ ...quote, dk: slash ? i.options.getInteger('dk') : Number(i.fields.getTextInputValue('dk')), bonus: slash ? i.options.getInteger('aufwand') ?? 10 : Number(i.fields.getTextInputValue('bonus')), partial: slash ? i.options.getBoolean('teilmengen') ?? true : true, note: slash ? i.options.getString('notiz') : '' }, i.user.id, i.id);
+      const o = store.create({ ...quote, dk: slash ? i.options.getInteger('dk') : Number(i.fields.getTextInputValue('dk')), bonus: slash ? i.options.getInteger('aufwand') ?? 0 : Number(i.fields.getTextInputValue('bonus')), partial: slash ? i.options.getBoolean('teilmengen') ?? true : true, note: slash ? i.options.getString('notiz') : '' }, i.user.id, i.id);
       await sync();
       return await i.editReply(`Auftrag gespeichert: ${o.id}\n${store.get(o.id).message ? 'Im Farmerchannel veröffentlicht.' : 'Veröffentlichung wird automatisch erneut versucht.'}`);
     }
