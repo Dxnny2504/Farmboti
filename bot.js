@@ -5,6 +5,7 @@ import { lookup } from './prices.js';
 
 const env = process.env;
 for (const key of ['DISCORD_TOKEN', 'GUILD_ID', 'FARM_CHANNEL_ID', 'MANAGER_ROLE_IDS']) if (!env[key]?.trim()) throw new Error(`${key} fehlt.`);
+if (!/^\d{17,20}$/.test(env.ADMIN_CHANNEL_ID || '')) throw new Error('ADMIN_CHANNEL_ID fehlt oder ist ungültig.');
 const ids = s => (s || '').split(',').map(v => v.trim()).filter(Boolean);
 const managers = ids(env.MANAGER_ROLE_IDS), farmers = ids(env.FARMER_ROLE_IDS);
 for (const id of [env.GUILD_ID, env.FARM_CHANNEL_ID, ...managers, ...farmers]) if (!/^\d{17,20}$/.test(id)) throw new Error('Ungültige Discord ID in der Konfiguration.');
@@ -118,9 +119,10 @@ client.on(Events.InteractionCreate, async i => {
     await i.deferReply({ flags: MessageFlags.Ephemeral });
     if (['meine', 'mine', 'pruefen', 'review'].includes(action)) return await i.editReply(overview(i.user.id, ['pruefen', 'review'].includes(action), Number(parts[1]) || 0));
     if (action === 'panel') {
-      const channel = await client.channels.fetch(env.FARM_CHANNEL_ID);
+      const channel = await client.channels.fetch(env.ADMIN_CHANNEL_ID);
+      if (!channel?.isTextBased() || channel.guildId !== env.GUILD_ID) throw new Error('Adminchannel ist ungültig.');
       await channel.send({ embeds: [new EmbedBuilder().setColor(0x3ba55c).setTitle('🌾 Farmboti · BotShop_CB6').setDescription('Übernimm einen Farmauftrag und erhalte den Warenwert plus Aufwand.\n\n🔒 Nur freigegebene Teamrollen erstellen Aufträge und bestätigen Auszahlungen.')], components: [row(button('create', '＋ Auftrag erstellen', ButtonStyle.Primary), button('mine:0', 'Meine Aufträge'), button('review:0', 'Lieferungen prüfen'))] });
-      return await i.editReply('Bedienfenster veröffentlicht.');
+      return await i.editReply('Adminpanel im privaten Adminchannel veröffentlicht.');
     }
     if (['auftrag', 'new'].includes(action)) {
       const slash = i.isChatInputCommand();
