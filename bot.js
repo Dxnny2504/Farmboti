@@ -24,7 +24,9 @@ const commands = [
     option('preis', 'Optionaler Preis pro DK ohne Tausenderpunkte, z. B. 32346,00', 3),
     option('aufwand', 'Aufwand in Prozent, Standard 10', 4, false, { min_value: 0, max_value: 100 }),
     option('teilmengen', 'Teilmengen erlauben, Standard ja', 5),
+    option('dauerauftrag', 'Kapazität nach bestätigter Lieferung erneut freigeben', 5),
     option('notiz', 'Abgabeort oder Hinweise', 3, false, { max_length: 500 }) ] },
+  { name: 'sand', description: 'Sanddauerauftrag mit 5 DK und 10 % Aufwand einrichten · nur Shopteam' },
   { name: 'panel', description: 'Bedienfenster im Farmerchannel veröffentlichen · nur Shopteam' },
   { name: 'meine', description: 'Eigene Reservierungen und Auszahlungen ansehen' },
   { name: 'pruefen', description: 'Lieferungen und offene Auszahlungen prüfen · nur Shopteam' },
@@ -33,18 +35,21 @@ const commands = [
 
 function orderPayload(o) {
   const open = remaining(o), total = o.dk * o.price;
-  const embed = new EmbedBuilder().setColor(o.cancelled ? 0x747f8d : 0x3ba55c).setTitle(`🌾 ${o.dk} DK ${safe(o.item)} gesucht`)
+  const embed = new EmbedBuilder().setColor(o.cancelled ? 0x747f8d : 0x3ba55c).setTitle(o.recurring ? `♻️ Dauerauftrag · ${safe(o.item)}` : `🌾 ${o.dk} DK ${safe(o.item)} gesucht`)
     .setDescription(`Erstellt von <@${o.creator}>${o.note ? '\n\n' + safe(o.note) : ''}`)
     .addFields(
-      { name: 'Noch verfügbar', value: `${o.cancelled ? 0 : open} DK`, inline: true },
+      { name: o.recurring ? `Verfügbar von ${o.dk} DK Kapazität` : 'Noch verfügbar', value: `${o.cancelled || o.paused ? 0 : open} DK`, inline: true },
       { name: 'Preis pro DK', value: money(o.price), inline: true },
       { name: 'Aufwand', value: `${o.bonus} %`, inline: true },
-      { name: 'Gesamter Warenwert', value: money(total), inline: true },
-      { name: 'Auszahlung für den Gesamtauftrag', value: money(amount(o.price, o.dk, o.bonus).total), inline: true },
-      { name: 'Status', value: o.cancelled ? 'Geschlossen' : open ? '🟢 Verfügbar' : 'Vollständig vergeben' },
+      { name: o.recurring ? 'Warenwert einer vollen Kapazität' : 'Gesamter Warenwert', value: money(total), inline: true },
+      { name: o.recurring ? 'Auszahlung bei voller Kapazität' : 'Auszahlung für den Gesamtauftrag', value: money(amount(o.price, o.dk, o.bonus).total), inline: true },
+      { name: 'Status', value: o.cancelled ? 'Geschlossen' : o.paused ? '⏸ Pausiert' : open ? '🟢 Verfügbar' : 'Vollständig vergeben' },
       { name: 'Auftrags ID', value: o.id })
     .setFooter({ text: `${o.source} • Preis für diesen Auftrag fest • ${o.partial ? 'Teilmengen erlaubt' : 'Nur Gesamtmenge'} • Auszahlung nach Prüfung` });
-  return { embeds: [embed], components: [row(button(`take:${o.id}`, '🌾 Auftrag annehmen', ButtonStyle.Success).setDisabled(o.cancelled || !open))], allowedMentions: { parse: [] } };
+  if (o.recurring) embed.addFields({ name: '♻️ Automatisch wieder verfügbar', value: 'Nach bestätigtem Wareneingang wird die gelieferte Menge wieder freigegeben. Offene Auszahlungen bleiben gespeichert.' });
+  const actions = [button(`take:${o.id}`, '🌾 Auftrag annehmen', ButtonStyle.Success).setDisabled(o.cancelled || !!o.paused || !open)];
+  if (o.recurring && !o.cancelled) actions.push(button(`${o.paused ? 'resume' : 'pause'}:${o.id}`, o.paused ? '▶ Fortsetzen · Team' : '⏸ Pausieren · Team'));
+  return { embeds: [embed], components: [row(...actions)], allowedMentions: { parse: [] } };
 }
 let syncing = false;
 async function sync() {
@@ -101,13 +106,13 @@ client.on(Events.InteractionCreate, async i => {
     const farmer = !farmers.length || farmers.some(id => member.roles.cache.has(id));
     const parts = (i.customId || '').split(':');
     const action = i.isChatInputCommand() ? i.commandName : parts[0];
-    const staff = ['auftrag', 'panel', 'pruefen', 'stornieren', 'create', 'new', 'review', 'receive', 'confirm', 'pay'];
+    const staff = ['auftrag', 'panel', 'pruefen', 'stornieren', 'create', 'new', 'review', 'receive', 'confirm', 'pay', 'sand', 'pause', 'resume'];
     if (staff.includes(action) && !team) return await privateReply(i, '🔒 Dafür brauchst du eine freigegebene Teamrolle.');
     if (['take', 'reserve'].includes(action) && !farmer) return await privateReply(i, 'Dafür brauchst du eine Farmerrolle.');
     if (action === 'create') return await i.showModal(modal('new', 'Farmauftrag erstellen', [['item', 'Itemname oder Item ID', ''], ['dk', 'Ganze DK', '2'], ['preis', 'DK Preis (leer = Preisrechner)', '', false], ['bonus', 'Aufwand in Prozent', '10']]));
     if (action === 'take') {
       const o = store.get(parts[1]);
-      if (o.cancelled || !remaining(o)) throw new Error('Auftrag ist nicht mehr verfügbar.');
+      if (o.cancelled || o.paused || !remaining(o)) throw new Error('Auftrag ist nicht mehr verfügbar.');
       return await i.showModal(modal(`reserve:${o.id}`, 'Auftrag übernehmen', [['dk', `Ganze DK (noch ${remaining(o)})`, String(o.partial ? 1 : remaining(o))]]));
     }
     if (action === 'confirm') {
@@ -117,9 +122,20 @@ client.on(Events.InteractionCreate, async i => {
     }
     await i.deferReply({ flags: MessageFlags.Ephemeral });
     if (['meine', 'mine', 'pruefen', 'review'].includes(action)) return await i.editReply(overview(i.user.id, ['pruefen', 'review'].includes(action), Number(parts[1]) || 0));
+    if (action === 'sand') {
+      const existing = store.all().find(o => o.recurring && !o.cancelled && o.item.toLowerCase() === 'sand');
+      if (existing) return await i.editReply(`Sanddauerauftrag existiert bereits: ${existing.id}${existing.paused ? '\nEr ist pausiert. Über den Auftrag fortsetzen.' : ''}`);
+      const o = store.create({ item: 'Sand', dk: 5, price: 3234600, bonus: 10, partial: true, recurring: true, source: 'Vereinbarter Sandpreis' }, i.user.id, i.id);
+      await sync();
+      return await i.editReply(`♻️ Sanddauerauftrag gespeichert: ${o.id}\n5 DK Kapazität · 35.580,60 $ pro DK inkl. Aufwand.\n${store.get(o.id).message ? 'Im Farmerchannel veröffentlicht.' : 'Veröffentlichung wird erneut versucht.'}`);
+    }
+    if (['pause', 'resume'].includes(action)) {
+      store.change(parts[1], i.user.id, action, {}, team, i.id);
+      await sync(); return await i.editReply(action === 'pause' ? '⏸ Neue Reservierungen pausiert. Bestehende Lieferungen und Auszahlungen laufen weiter.' : '▶ Dauerauftrag wieder verfügbar.');
+    }
     if (action === 'panel') {
       const channel = await client.channels.fetch(env.FARM_CHANNEL_ID);
-      await channel.send({ embeds: [new EmbedBuilder().setColor(0x3ba55c).setTitle('🌾 Farmboti · BotShop_CB6').setDescription('Übernimm einen Farmauftrag und erhalte den Warenwert plus Aufwand.\n\n🔒 Nur freigegebene Teamrollen erstellen Aufträge und bestätigen Auszahlungen.')], components: [row(button('create', '＋ Auftrag erstellen', ButtonStyle.Primary), button('mine:0', 'Meine Aufträge'), button('review:0', 'Lieferungen prüfen'))] });
+      await channel.send({ embeds: [new EmbedBuilder().setColor(0x3ba55c).setTitle('🌾 Farmboti · BotShop_CB6').setDescription('Übernimm einen Farmauftrag und erhalte den Warenwert plus Aufwand.\n\n🔒 Nur freigegebene Teamrollen erstellen Aufträge und bestätigen Auszahlungen.')], components: [row(button('create', '＋ Auftrag erstellen', ButtonStyle.Primary), button('mine:0', 'Meine Aufträge'), button('review:0', 'Lieferungen prüfen'), button('sand', '♻️ Sand · 5 DK'))] });
       return await i.editReply('Bedienfenster veröffentlicht.');
     }
     if (['auftrag', 'new'].includes(action)) {
@@ -127,7 +143,7 @@ client.on(Events.InteractionCreate, async i => {
       const item = (slash ? i.options.getString('item') : i.fields.getTextInputValue('item')).trim();
       const rawPrice = slash ? i.options.getString('preis') : i.fields.getTextInputValue('preis');
       const quote = rawPrice?.trim() ? { item, price: cents(rawPrice), source: 'Manuell' } : await lookup(env.PREISRECHNER_URL, item);
-      const o = store.create({ ...quote, dk: slash ? i.options.getInteger('dk') : Number(i.fields.getTextInputValue('dk')), bonus: slash ? i.options.getInteger('aufwand') ?? 10 : Number(i.fields.getTextInputValue('bonus')), partial: slash ? i.options.getBoolean('teilmengen') ?? true : true, note: slash ? i.options.getString('notiz') : '' }, i.user.id, i.id);
+      const o = store.create({ ...quote, dk: slash ? i.options.getInteger('dk') : Number(i.fields.getTextInputValue('dk')), bonus: slash ? i.options.getInteger('aufwand') ?? 10 : Number(i.fields.getTextInputValue('bonus')), partial: slash ? i.options.getBoolean('teilmengen') ?? true : true, recurring: slash ? i.options.getBoolean('dauerauftrag') ?? false : false, note: slash ? i.options.getString('notiz') : '' }, i.user.id, i.id);
       await sync();
       return await i.editReply(`Auftrag gespeichert: ${o.id}\n${store.get(o.id).message ? 'Im Farmerchannel veröffentlicht.' : 'Veröffentlichung wird automatisch erneut versucht.'}`);
     }

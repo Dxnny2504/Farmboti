@@ -18,7 +18,11 @@ export function amount(price, dk, bonus) {
   const extra = Number((BigInt(base) * BigInt(bonus) + 50n) / 100n);
   return { base, extra, total: base + extra };
 }
-export const remaining = o => o.dk - o.claims.filter(c => c.status !== 'released').reduce((sum, c) => sum + c.dk, 0);
+// Recurring capacity becomes available only after staff confirms receipt.
+// Ordinary orders continue counting received and paid deliveries against their total.
+export const remaining = o => o.dk - o.claims.filter(c => o.recurring
+  ? ['reserved', 'ready'].includes(c.status)
+  : c.status !== 'released').reduce((sum, c) => sum + c.dk, 0);
 export class Store {
   constructor(path) {
     if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
@@ -44,20 +48,27 @@ export class Store {
       const note = String(data.note || '').trim();
       if (note.length > 500) throw new Error('Notiz darf maximal 500 Zeichen haben.');
       amount(data.price, data.dk, data.bonus);
-      const o = { id: randomUUID(), item, dk: data.dk, price: data.price, bonus: data.bonus, partial: !!data.partial, note, source: data.source || 'Manuell', creator: actor, created: Date.now(), cancelled: false, claims: [], message: null, dirty: true };
+      if (data.recurring && this.all().some(o => o.recurring && !o.cancelled && o.item.toLowerCase() === item.toLowerCase())) throw new Error('Für dieses Item besteht bereits ein Dauerauftrag. Nutze den vorhandenen Auftrag.');
+      const o = { id: randomUUID(), item, dk: data.dk, price: data.price, bonus: data.bonus, partial: !!data.partial, recurring: !!data.recurring, paused: false, note, source: data.source || 'Manuell', creator: actor, created: Date.now(), cancelled: false, claims: [], message: null, dirty: true };
       this.put(o); return o;
     });
   }
   change(id, actor, action, args, team, request) {
     return this.transaction(request, () => {
       const o = this.get(id);
-      if (action === 'cancel') {
+      if (['pause', 'resume'].includes(action)) {
+        if (!team) throw new Error('Nur freigegebene Teamrollen dürfen Daueraufträge verwalten.');
+        if (!o.recurring || o.cancelled) throw new Error('Kein aktiver Dauerauftrag.');
+        if (!!o.paused === (action === 'pause')) throw new Error('Dieser Status ist bereits gesetzt.');
+        o.paused = action === 'pause';
+        o.history = [...(o.history || []), { action, actor, at: Date.now() }];
+      } else if (action === 'cancel') {
         if (!team) throw new Error('Nur freigegebene Teamrollen dürfen stornieren.');
         if (o.cancelled) throw new Error('Auftrag ist bereits storniert.');
         if (o.claims.some(c => !['released', 'paid'].includes(c.status))) throw new Error('Es bestehen noch aktive Reservierungen.');
         o.cancelled = true;
       } else if (action === 'take') {
-        if (o.cancelled || !o.message) throw new Error('Auftrag ist nicht verfügbar.');
+        if (o.cancelled || o.paused || !o.message) throw new Error('Auftrag ist nicht verfügbar.');
         integer(args.dk, 1, 10000, 'DK');
         if (args.dk > remaining(o) || (!o.partial && args.dk !== remaining(o))) throw new Error('Diese Menge ist nicht verfügbar oder Teilmengen sind nicht erlaubt.');
         o.claims.push({ id: randomUUID(), user: actor, dk: args.dk, status: 'reserved', ...amount(o.price, args.dk, o.bonus), created: Date.now(), history: [{ action, actor, at: Date.now() }] });

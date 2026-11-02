@@ -86,3 +86,17 @@ npm start
 Der neue Reiter im Preisrechner, Erstellung aus dem Browser, Discord Anmeldung für den Preisrechner, Fristen und Erinnerungen, Level, Ranglisten sowie Itemabonnements sind weitere Ausbauschritte. Diese Version verändert das Preisrechner Repository nicht und bietet keine ungeschützte HTTP Schnittstelle zum Erstellen von Aufträgen.
 
 Ein echter Discord Test erfordert den eigenen Bot Token, Server und Rollen. Automatisiert getestet sind Geldberechnung, Zustandswechsel, Rollenbedingungen im Auftragsmodell, Deduplizierung, Mengenreservierung, Persistenz und der Preisadapter mit simulierten Antworten.
+
+## Sand als Dauerauftrag
+
+`/sand` erstellt genau einen Sanddauerauftrag mit 5 DK gleichzeitig reservierbarer Kapazität, dem vereinbarten Preis von 32.346 $ pro DK und 10 % Aufwand. Pro DK werden damit 35.580,60 $ ausgezahlt. Nur freigegebene Teamrollen können ihn erstellen. Erneutes Ausführen zeigt den bestehenden Auftrag, statt einen zweiten anzulegen. Das neue `/panel` hat dafür den Button „Sand · 5 DK“.
+
+Andere Daueraufträge sind über `/auftrag` mit `dauerauftrag:true` möglich. Die normale Preisübernahme funktioniert dabei wie bei Einzelaufträgen. `/sand` nutzt bewusst den vereinbarten festen Preis, unabhängig vom aktuellen Preisrechner.
+
+Reservierte und zur Abgabe gemeldete Mengen belegen die Kapazität. Erst „Wareneingang bestätigen“ durch das Team gibt die gelieferte Menge wieder frei. Der Beleg und die offene Auszahlung bleiben erhalten, auch wenn bereits der nächste Farmer annimmt. Das Bestätigen einer Zahlung füllt nicht erneut auf.
+
+Die 5 DK begrenzen gleichzeitig ausstehende Lieferungen, nicht die Gesamtmenge oder das Gesamtbudget über die Zeit. Der Auftrag bleibt bei seinem veröffentlichten Preis, bis er geschlossen und neu erstellt wird.
+
+„Pausieren · Team“ verhindert neue Annahmen, auch aus vorher geöffneten Formularen. „Fortsetzen · Team“ gibt sie wieder frei. Bestehende Lieferungen und Zahlungen bleiben während einer Pause bearbeitbar. `/stornieren` schließt endgültig, sobald alle Reservierungen freigegeben oder bezahlt sind.
+
+Ältere gespeicherte Aufträge funktionieren unverändert. Vor dem Deployment auf ein neues Volume muss eine vorhandene Datenbank des laufenden Containers gesichert und übernommen werden. Ein leeres Volume übernimmt diese Daten nicht automatisch.

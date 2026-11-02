@@ -87,3 +87,65 @@ test('Mehrdeutige und fehlende Items werden abgewiesen', async t => {
   await assert.rejects(lookup('https://example.com', 'Sand'));
   await assert.rejects(lookup('https://example.com', 'Kies'));
 });
+function recurring(t) {
+  const s = new Store(':memory:'); t.after(() => s.db.close());
+  const o = s.create({ item: 'Sand', dk: 5, price: 3234600, bonus: 10, partial: true, recurring: true }, 'manager', request());
+  o.message = 'message'; s.put(o); return { s, id: o.id };
+}
+test('Dauerauftrag: fünf DK Kapazität, Auffüllen erst bei Wareneingang', t => {
+  const { s, id } = recurring(t);
+  const c = s.change(id, 'farmer', 'take', { dk: 5 }, false, request()).claims[0];
+  assert.equal(c.total, 17790300);
+  assert.equal(remaining(s.get(id)), 0);
+  s.change(id, 'farmer', 'ready', { claim: c.id }, false, request());
+  assert.equal(remaining(s.get(id)), 0);
+  s.change(id, 'manager', 'receive', { claim: c.id }, true, request());
+  assert.equal(remaining(s.get(id)), 5);
+  s.change(id, 'other', 'take', { dk: 5 }, false, request());
+  s.change(id, 'manager', 'pay', { claim: c.id }, true, request());
+  assert.equal(remaining(s.get(id)), 0, 'Zahlung füllt nicht ein zweites Mal auf');
+  assert.equal(s.get(id).claims[0].status, 'paid');
+  assert.equal(s.get(id).claims[1].status, 'reserved');
+});
+test('Teillieferung gibt exakt ihre Menge frei, wiederholte Bestätigung scheitert', t => {
+  const { s, id } = recurring(t);
+  const c = s.change(id, 'a', 'take', { dk: 2 }, false, request()).claims[0];
+  s.change(id, 'b', 'take', { dk: 3 }, false, request());
+  s.change(id, 'a', 'ready', { claim: c.id }, false, request());
+  s.change(id, 'manager', 'receive', { claim: c.id }, true, request());
+  assert.equal(remaining(s.get(id)), 2);
+  assert.throws(() => s.change(id, 'manager', 'receive', { claim: c.id }, true, request()));
+  assert.throws(() => s.change(id, 'c', 'take', { dk: 3 }, false, request()));
+  assert.equal(remaining(s.get(id)), 2);
+});
+test('Pause blockiert alte Annahmeformulare, aber nicht bestehende Lieferungen', t => {
+  const { s, id } = recurring(t);
+  const c = s.change(id, 'a', 'take', { dk: 2 }, false, request()).claims[0];
+  assert.throws(() => s.change(id, 'a', 'pause', {}, false, request()));
+  s.change(id, 'manager', 'pause', {}, true, request());
+  assert.throws(() => s.change(id, 'b', 'take', { dk: 1 }, false, request()));
+  s.change(id, 'a', 'ready', { claim: c.id }, false, request());
+  s.change(id, 'manager', 'receive', { claim: c.id }, true, request());
+  assert.equal(s.get(id).paused, true);
+  assert.throws(() => s.change(id, 'b', 'take', { dk: 1 }, false, request()));
+  s.change(id, 'manager', 'resume', {}, true, request());
+  s.change(id, 'b', 'take', { dk: 5 }, false, request());
+  assert.equal(remaining(s.get(id)), 0);
+});
+test('Doppelter Dauerauftrag ist auch während Pause gesperrt', t => {
+  const { s, id } = recurring(t);
+  s.change(id, 'manager', 'pause', {}, true, request());
+  assert.throws(() => s.create({ item: 'sand', dk: 5, price: 100, bonus: 10, recurring: true }, 'manager', request()));
+  s.change(id, 'manager', 'cancel', {}, true, request());
+  assert.throws(() => s.change(id, 'manager', 'resume', {}, true, request()));
+  assert.doesNotThrow(() => s.create({ item: 'Sand', dk: 5, price: 100, bonus: 10, recurring: true }, 'manager', request()));
+});
+test('Alte Aufträge ohne neue Felder behalten das bisherige Mengenverhalten', t => {
+  const { s, id } = setup(t);
+  const o = s.get(id); delete o.recurring; delete o.paused; s.put(o);
+  const c = s.change(id, 'a', 'take', { dk: 2 }, false, request()).claims[0];
+  s.change(id, 'a', 'ready', { claim: c.id }, false, request());
+  s.change(id, 'manager', 'receive', { claim: c.id }, true, request());
+  assert.equal(remaining(s.get(id)), 0);
+  assert.throws(() => s.change(id, 'manager', 'pause', {}, true, request()));
+});
