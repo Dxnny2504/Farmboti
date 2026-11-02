@@ -45,7 +45,7 @@ function orderPayload(o) {
       { name: 'Status', value: o.cancelled ? 'Geschlossen' : open ? '🟢 Verfügbar' : 'Vollständig vergeben' },
       { name: 'Auftrags ID', value: o.id })
     ;
-  return { embeds: [embed], components: [row(button(`take:${o.id}`, '🌾 Auftrag annehmen', ButtonStyle.Success).setDisabled(o.cancelled || !open))], allowedMentions: { parse: [] } };
+  return { embeds: [embed], components: [row(button(`take:${o.id}`, '🌾 Auftrag annehmen', ButtonStyle.Success).setDisabled(o.cancelled || !open), button(`status:${o.id}`, 'Mein Status'), button(`claimants:${o.id}`, 'Übernahmen ansehen'))], allowedMentions: { parse: [] } };
 }
 let syncing = false;
 async function sync() {
@@ -99,12 +99,22 @@ client.on(Events.InteractionCreate, async i => {
     // Fetch live roles: neither cached roles nor administrator permissions bypass the allowlist.
     const member = await i.guild.members.fetch({ user: i.user.id, force: true });
     const team = member.permissions.has(PermissionFlagsBits.Administrator);
+    const management = team || managers.some(id => member.roles.cache.has(id));
     const farmer = !farmers.length || farmers.some(id => member.roles.cache.has(id));
     const parts = (i.customId || '').split(':');
     const action = i.isChatInputCommand() ? i.commandName : parts[0];
     const staff = ['auftrag', 'panel', 'pruefen', 'stornieren', 'create', 'new', 'review', 'receive', 'confirm', 'pay'];
     if (staff.includes(action) && !team) return await privateReply(i, '🔒 Dafür brauchst du eine freigegebene Teamrolle.');
+    if (action === 'claimants' && !management) return await privateReply(i, '🔒 Nur Management und Administratoren können Übernahmen einsehen.');
     if (['take', 'reserve'].includes(action) && !farmer) return await privateReply(i, 'Dafür brauchst du eine Farmerrolle.');
+    if (action === 'status' || action === 'claimants') {
+      const o = store.get(parts[1]);
+      const claims = o.claims.filter(claim => action === 'claimants' || claim.user === i.user.id);
+      const visible = claims.filter(claim => claim.status !== 'released');
+      const title = action === 'status' ? 'Dein Auftragsstatus' : 'Auftragsübernahmen';
+      const lines = visible.map(claim => `${action === 'claimants' ? '<@' + claim.user + '> · ' : ''}${claim.dk} DK · ${states[claim.status]} · Auszahlung: ${money(claim.total)}`);
+      return await privateReply(i, `**${title}: ${safe(o.item)}**\n${lines.length ? lines.join('\n').slice(0, 1750) : action === 'status' ? 'Du hast diesen Auftrag noch nicht angenommen.' : 'Noch niemand hat diesen Auftrag angenommen.'}`);
+    }
     if (action === 'create') return await i.showModal(modal('new', 'Farmauftrag erstellen', [['item', 'Itemname oder Item ID', ''], ['dk', 'Ganze DK', '2'], ['preis', 'DK Preis (leer = Preisrechner)', '', false], ['bonus', 'Zusätzlicher Aufwand in Prozent', '0']]));
     if (action === 'take') {
       const o = store.get(parts[1]);
