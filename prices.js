@@ -16,5 +16,5 @@ export async function lookup(base, query) {
   if (!data.success || !Array.isArray(data.items)) throw new Error('Ungültige Antwort vom Preisrechner.');
   const matches = data.items.filter(i => [i.name, i.id, i.numericalId].some(v => String(v).toLowerCase() === query.toLowerCase()));
   if (matches.length !== 1) throw new Error('Item nicht eindeutig gefunden. Bitte den exakten Namen oder die Item ID eingeben.');
-  return { item: matches[0].name, price: dkPrice(matches[0].priceTiers), source: 'Preisrechner' };
+  return { item: matches[0].name, price: Math.round(dkPrice(matches[0].priceTiers) * 70 / 100), source: 'Preisrechner × 0,7' };
 }
