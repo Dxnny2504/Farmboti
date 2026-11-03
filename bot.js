@@ -72,7 +72,7 @@ async function sync() {
   } finally { syncing = false; }
 }
 function overview(user, teamView, page = 0) {
-  const all = store.all().flatMap(o => o.claims.map(c => ({ o, c }))).filter(({ c }) => teamView ? ['ready', 'received'].includes(c.status) : c.user === user);
+  const all = store.all().flatMap(o => o.claims.map(c => ({ o, c }))).filter(({ c }) => teamView ? c.status !== 'released' : c.user === user);
   const max = Math.max(0, Math.ceil(all.length / 4) - 1);
   page = Math.max(0, Math.min(max, page));
   const slice = all.slice(page * 4, page * 4 + 4);
@@ -81,13 +81,13 @@ function overview(user, teamView, page = 0) {
     .setFooter({ text: `Beleg / Reservierung: ${c.id}` }));
   const components = slice.map(({ o, c }) => {
     const key = `${o.id}:${c.id}`;
-    if (teamView) return row(button(`${c.status === 'ready' ? 'receive' : 'confirm'}:${key}`, `${c.status === 'ready' ? 'Wareneingang' : 'Auszahlung'} bestätigen`, ButtonStyle.Success));
+    if (teamView) return c.status === 'ready' || c.status === 'received' ? row(button(`${c.status === 'ready' ? 'receive' : 'confirm'}:${key}`, `${c.status === 'ready' ? 'Wareneingang' : 'Auszahlung'} bestätigen`, ButtonStyle.Success)) : null;
     return c.status === 'reserved' ? row(button(`ready:${key}`, '📦 Zur Abgabe bereit', ButtonStyle.Success), button(`release:${key}`, 'Freigeben')) : null;
   }).filter(Boolean);
-  const prefix = teamView ? 'review' : 'mine';
+  const prefix = teamView ? 'management' : 'mine';
   if (max) components.push(row(button(`${prefix}:${page - 1}`, 'Zurück').setDisabled(!page), button(`${prefix}:${page + 1}`, 'Weiter').setDisabled(page === max)));
   const paid = all.filter(({ c }) => c.status === 'paid').reduce((sum, { c }) => sum + c.total, 0);
-  return { content: teamView ? `**Lieferungen prüfen** · Seite ${page + 1}/${max + 1}${all.length ? '' : '\nKeine offenen Prüfungen.'}` : `**Meine Aufträge** · Seite ${page + 1}/${max + 1}\nBisher ausgezahlt: ${money(paid)}${all.length ? '' : '\nDu hast noch keine Aufträge angenommen.'}`, embeds, components, allowedMentions: { parse: [] } };
+  return { content: teamView ? `**Auftragsverwaltung** · Seite ${page + 1}/${max + 1}${all.length ? '' : '\nKeine Auftragsübernahmen vorhanden.'}` : `**Meine Aufträge** · Seite ${page + 1}/${max + 1}\nBisher ausgezahlt: ${money(paid)}${all.length ? '' : '\nDu hast noch keine Aufträge angenommen.'}`, embeds, components, allowedMentions: { parse: [] } };
 }
 function modal(id, title, fields) {
   return new ModalBuilder().setCustomId(id).setTitle(title).addComponents(...fields.map(([id, label, value, required = true]) => row(new TextInputBuilder().setCustomId(id).setLabel(label).setStyle(TextInputStyle.Short).setRequired(required).setMaxLength(id === 'item' ? 100 : 50).setValue(value))));
@@ -104,6 +104,7 @@ client.on(Events.InteractionCreate, async i => {
     const parts = (i.customId || '').split(':');
     const action = i.isChatInputCommand() ? i.commandName : parts[0];
     const staff = ['auftrag', 'panel', 'pruefen', 'stornieren', 'create', 'new', 'review', 'receive', 'confirm', 'pay'];
+    if (action === 'management' && !management) return await privateReply(i, 'Nur Management und Administratoren dürfen diese Übersicht sehen.');
     if (staff.includes(action) && !team) return await privateReply(i, '🔒 Dafür brauchst du eine freigegebene Teamrolle.');
     if (action === 'claimants' && !management) return await privateReply(i, '🔒 Nur Management und Administratoren können Übernahmen einsehen.');
     if (['take', 'reserve'].includes(action) && !farmer) return await privateReply(i, 'Dafür brauchst du eine Farmerrolle.');
@@ -127,11 +128,11 @@ client.on(Events.InteractionCreate, async i => {
       return await privatePayment(i, o, c);
     }
     await i.deferReply({ flags: MessageFlags.Ephemeral });
-    if (['meine', 'mine', 'pruefen', 'review'].includes(action)) return await i.editReply(overview(i.user.id, ['pruefen', 'review'].includes(action), Number(parts[1]) || 0));
+    if (['meine', 'mine', 'pruefen', 'review', 'management'].includes(action)) return await i.editReply(overview(i.user.id, ['pruefen', 'review', 'management'].includes(action), Number(parts[1]) || 0));
     if (action === 'panel') {
       const channel = await client.channels.fetch(env.ADMIN_CHANNEL_ID);
       if (!channel?.isTextBased() || channel.guildId !== env.GUILD_ID) throw new Error('Adminchannel ist ungültig.');
-      await channel.send({ embeds: [new EmbedBuilder().setColor(0x3ba55c).setTitle('🌾 Farmboti · BotShop_CB6').setDescription('Übernimm einen Farmauftrag und erhalte den Warenwert plus Aufwand.\n\n🔒 Nur freigegebene Teamrollen erstellen Aufträge und bestätigen Auszahlungen.')], components: [row(button('create', '＋ Auftrag erstellen', ButtonStyle.Primary), button('mine:0', 'Meine Aufträge'), button('review:0', 'Lieferungen prüfen'))] });
+      await channel.send({ embeds: [new EmbedBuilder().setColor(0x5865f2).setTitle('🌾 Farmboti | Verwaltung').setDescription('Erstelle Farmaufträge und prüfe, welche Farmer sie übernommen haben.\n\nDie Auftragsverwaltung zeigt Farmer, Mengen, Bearbeitungsstatus und Auszahlungen.')], components: [row(button('create', '＋ Auftrag erstellen', ButtonStyle.Primary), button('management:0', 'Übernahmen verwalten'), button('review:0', 'Lieferungen prüfen'))] });
       return await i.editReply('Adminpanel im privaten Adminchannel veröffentlicht.');
     }
     if (['auftrag', 'new'].includes(action)) {
