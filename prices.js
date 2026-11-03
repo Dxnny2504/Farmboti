@@ -5,21 +5,21 @@ export function dkPrice(tiers) {
   if (!tier) throw new Error('Keine Staffel für 54 oder 1 Stack vorhanden. DK Preis bitte manuell angeben.');
   return cents(tier.totalPrice) * (Number(tier.stacks) === 54 ? 1 : 54);
 }
-const aliases = new Map([
-  ['tropenbaumlaub', 'Dschungelblätter'],
-  ['tropenbaumblätter', 'Dschungelblätter'],
-  ['tropenbaumblatter', 'Dschungelblätter'],
-  ['tropenblätter', 'Dschungelblätter'],
-  ['tropenlaub', 'Dschungelblätter'],
-  ['jungle leaves', 'Dschungelblätter']
-]);
 const normalize = value => String(value ?? '').trim().toLocaleLowerCase('de-DE').normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/ß/g, 'ss').replace(/[^a-z0-9]/g, '');
+const leaves = [
+  { name: 'Eichenblätter', english: 'Oak Leaves', aliases: ['eichenlaub', 'eichenblatter', 'oakleaves'] },
+  { name: 'Fichtenblätter', english: 'Spruce Leaves', aliases: ['fichtenlaub', 'fichtenblatter', 'spruceleaves'] },
+  { name: 'Birkenblätter', english: 'Birch Leaves', aliases: ['birkenlaub', 'birkenblatter', 'birchleaves'] },
+  { name: 'Dschungelblätter', english: 'Jungle Leaves', aliases: ['dschungellaub', 'dschungelblatter', 'tropenbaumlaub', 'tropenbaumblatter', 'tropenlaub', 'tropenblatter', 'jungleleaves'] },
+  { name: 'Akazienblätter', english: 'Acacia Leaves', aliases: ['akazienlaub', 'akazienblatter', 'acacialeaves'] },
+  { name: 'Schwarzeichenblätter', english: 'Dark Oak Leaves', aliases: ['schwarzeichenlaub', 'schwarzeichenblatter', 'dunkeleichenlaub', 'dunkeleichenblatter', 'darkoakleaves'] }
+];
 export async function lookup(base, query) {
   if (!base) throw new Error('PREISRECHNER_URL fehlt. Alternativ den DK Preis manuell angeben.');
   const raw = String(query || '').trim();
   const key = normalize(raw);
-  const jungle = ['tropenbaumlaub', 'tropenbaumblatter', 'tropenlaub', 'dschungelblatter', 'jungleleaves', '183'].includes(key);
-  const terms = jungle ? ['Dschungelblätter', 'Jungle Leaves', '18:3', 'Tropenbaumlaub'] : [aliases.get(raw.toLocaleLowerCase('de-DE')) || raw];
+  const leaf = leaves.find(l => l.aliases.includes(key) || normalize(l.name) === key);
+  const terms = leaf ? [leaf.name, leaf.english] : [raw];
   const candidates = [];
   for (const term of terms) {
     const url = new URL('/api/items/search', base);
@@ -35,9 +35,9 @@ export async function lookup(base, query) {
   }
   const matches = candidates.filter(item => {
     const names = [item.name, item.originalName, item.id, item.itemId, item.legacyId, item.numericalId];
-    return jungle
-      ? names.some(v => ['dschungelblatter', 'jungleleaves', 'tropenbaumlaub', '183'].includes(normalize(v)))
-      : names.some(v => normalize(v) === key || normalize(v) === normalize(terms[0]));
+    return leaf
+      ? names.some(v => normalize(v) === normalize(leaf.name) || normalize(v) === normalize(leaf.english))
+      : names.some(v => normalize(v) === key);
   });
   if (matches.length !== 1) {
     throw new Error(matches.length ? 'Mehrere passende Items gefunden. Bitte eine eindeutige Item ID verwenden.' : 'Item im Preisrechner nicht gefunden: ' + raw + '. Prüfe, ob es dort angelegt ist.');
