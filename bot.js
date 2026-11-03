@@ -166,6 +166,30 @@ client.on(Events.InteractionCreate, async i => {
       const o = store.change(parts[1], i.user.id, action, { claim: parts[2] }, team, i.id);
       await sync();
       const c = o.claims.find(c => c.id === parts[2]);
+      if (action === 'ready') {
+        try {
+          const adminChannel = await client.channels.fetch(env.ADMIN_CHANNEL_ID);
+          if (!adminChannel?.isTextBased() || adminChannel.guildId !== env.GUILD_ID) throw new Error('Farmpanel Channel nicht erreichbar.');
+          const notice = new EmbedBuilder()
+            .setColor(0xf1c40f)
+            .setTitle('📦 Neue Lieferung zur Prüfung')
+            .setDescription(`<@${c.user}> hat eine Lieferung zur Abgabe freigegeben.`)
+            .addFields(
+              { name: 'Item', value: safe(o.item), inline: true },
+              { name: 'Menge', value: `${c.dk} DK`, inline: true },
+              { name: 'Auszahlung', value: money(c.total), inline: true },
+              { name: 'Status', value: states[c.status] },
+              { name: 'Auftrag', value: o.id }
+            );
+          await adminChannel.send({
+            embeds: [notice],
+            components: [row(button('management:0', 'Übernahmen verwalten', ButtonStyle.Primary), button('review:0', 'Lieferung prüfen', ButtonStyle.Success))],
+            allowedMentions: { parse: [] }
+          });
+        } catch (notifyError) {
+          console.error('Farmpanel Benachrichtigung fehlgeschlagen:', notifyError.code || notifyError.message);
+        }
+      }
       return await i.editReply(`${states[c.status]}\nReservierung: ${c.id}\nAuszahlung: ${money(c.total)}${action === 'pay' ? '\nDie manuell erfolgte Zahlung wurde dokumentiert.' : action === 'ready' ? '\nDeine Lieferung wurde zur Prüfung durch das Shopteam freigegeben.' : ''}`);
     }
     throw new Error('Unbekannte Aktion. Bitte /meine oder /pruefen verwenden.');
