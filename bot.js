@@ -114,7 +114,16 @@ client.on(Events.InteractionCreate, async i => {
       const visible = claims.filter(claim => claim.status !== 'released');
       const title = action === 'status' ? 'Dein Auftragsstatus' : 'Auftragsübernahmen';
       const lines = visible.map(claim => `${action === 'claimants' ? '<@' + claim.user + '> · ' : ''}${claim.dk} DK · ${states[claim.status]} · Auszahlung: ${money(claim.total)}`);
-      return await privateReply(i, `**${title}: ${safe(o.item)}**\n${lines.length ? lines.join('\n').slice(0, 1750) : action === 'status' ? 'Du hast diesen Auftrag noch nicht angenommen.' : 'Noch niemand hat diesen Auftrag angenommen.'}`);
+      const content = `**${title}: ${safe(o.item)}**\n${lines.length ? lines.join('\n').slice(0, 1750) : action === 'status' ? 'Du hast diesen Auftrag noch nicht angenommen.' : 'Noch niemand hat diesen Auftrag angenommen.'}`;
+      if (action === 'status') {
+        const active = visible.filter(claim => claim.status === 'reserved').slice(0, 4);
+        const components = active.map(claim => row(
+          button(`ready:${o.id}:${claim.id}`, `${claim.dk} DK zur Lieferung freigeben`, ButtonStyle.Success),
+          button(`release:${o.id}:${claim.id}`, `${claim.dk} DK Reservierung aufheben`)
+        ));
+        return await i.reply({ content, components, flags: MessageFlags.Ephemeral, allowedMentions: { parse: [] } });
+      }
+      return await privateReply(i, content);
     }
     if (action === 'create') return await i.showModal(modal('new', 'Farmauftrag erstellen', [['item', 'Itemname oder Item ID', ''], ['dk', 'Ganze DK', '2'], ['preis', 'DK Preis (leer = Preisrechner)', '', false], ['bonus', 'Zusätzlicher Aufwand in Prozent', '0']]));
     if (action === 'take') {
@@ -151,13 +160,13 @@ client.on(Events.InteractionCreate, async i => {
     if (action === 'reserve') {
       const o = store.change(parts[1], i.user.id, 'take', { dk: Number(i.fields.getTextInputValue('dk')) }, team, i.id);
       const c = o.claims.at(-1);
-      await sync(); return await i.editReply(`✅ ${c.dk} DK ${safe(o.item)} reserviert. Vereinbarte Auszahlung: **${money(c.total)}**\nMit /meine kannst du deine Lieferung melden.`);
+      await sync(); return await i.editReply(`✅ ${c.dk} DK ${safe(o.item)} reserviert. Vereinbarte Auszahlung: **${money(c.total)}**\nÜber „Mein Status“ beim Auftrag kannst du die Lieferung freigeben oder die Reservierung aufheben.`);
     }
     if (['ready', 'release', 'receive', 'pay'].includes(action)) {
       const o = store.change(parts[1], i.user.id, action, { claim: parts[2] }, team, i.id);
       await sync();
       const c = o.claims.find(c => c.id === parts[2]);
-      return await i.editReply(`${states[c.status]}\nReservierung: ${c.id}\nAuszahlung: ${money(c.total)}${action === 'pay' ? '\nDie manuell erfolgte Zahlung wurde dokumentiert.' : ''}`);
+      return await i.editReply(`${states[c.status]}\nReservierung: ${c.id}\nAuszahlung: ${money(c.total)}${action === 'pay' ? '\nDie manuell erfolgte Zahlung wurde dokumentiert.' : action === 'ready' ? '\nDeine Lieferung wurde zur Prüfung durch das Shopteam freigegeben.' : ''}`);
     }
     throw new Error('Unbekannte Aktion. Bitte /meine oder /pruefen verwenden.');
   } catch (error) {
