@@ -4,9 +4,6 @@ import { Store, cents, remaining, amount } from './store.js';
 import { lookup } from './prices.js';
 
 const env = process.env;
-// 13 December 2026, 00:00 in Germany (CET). No Discord announcements.
-const SHUTDOWN_AT = Date.parse('2026-12-13T00:00:00+01:00');
-let retired = Date.now() >= SHUTDOWN_AT;
 for (const key of ['DISCORD_TOKEN', 'GUILD_ID', 'FARM_CHANNEL_ID', 'MANAGER_ROLE_IDS']) if (!env[key]?.trim()) throw new Error(`${key} fehlt.`);
 if (!/^\d{17,20}$/.test(env.ADMIN_CHANNEL_ID || '')) throw new Error('ADMIN_CHANNEL_ID fehlt oder ist ungültig.');
 const ids = s => (s || '').split(',').map(v => v.trim()).filter(Boolean);
@@ -52,7 +49,7 @@ function orderPayload(o) {
 }
 let syncing = false;
 async function sync() {
-  if (retired || syncing || !client.isReady()) return;
+  if (syncing || !client.isReady()) return;
   syncing = true;
   try {
     const channel = await client.channels.fetch(env.FARM_CHANNEL_ID);
@@ -96,7 +93,7 @@ function modal(id, title, fields) {
   return new ModalBuilder().setCustomId(id).setTitle(title).addComponents(...fields.map(([id, label, value, required = true]) => row(new TextInputBuilder().setCustomId(id).setLabel(label).setStyle(TextInputStyle.Short).setRequired(required).setMaxLength(id === 'item' ? 100 : 50).setValue(value))));
 }
 client.on(Events.InteractionCreate, async i => {
-  if (retired || !(i.isChatInputCommand() || i.isButton() || i.isModalSubmit())) return;
+  if (!(i.isChatInputCommand() || i.isButton() || i.isModalSubmit())) return;
   try {
     if (i.guildId !== env.GUILD_ID) return await privateReply(i, 'Dieser Bot ist für einen anderen Server eingerichtet.');
     // Fetch live roles: neither cached roles nor administrator permissions bypass the allowlist.
@@ -206,7 +203,6 @@ async function privatePayment(i, o, c) {
   return i.reply({ flags: MessageFlags.Ephemeral, content: `Hast du **${money(c.total)}** an <@${c.user}> im Spiel bezahlt?\nDieser Button dokumentiert die Zahlung. Er überweist kein Geld.`, components: [row(button(`pay:${o.id}:${c.id}`, 'Ja, Zahlung ist erfolgt', ButtonStyle.Success))], allowedMentions: { parse: [] } });
 }
 client.once(Events.ClientReady, async () => {
-  if (retired) return;
   try {
     const guild = await client.guilds.fetch(env.GUILD_ID);
     await guild.commands.set(commands);
@@ -215,47 +211,7 @@ client.once(Events.ClientReady, async () => {
   } catch (error) { console.error('Start fehlgeschlagen:', error.code || error.name); process.exitCode = 1; clearInterval(timer); client.destroy(); server.close(); }
 });
 const timer = setInterval(() => sync().catch(e => console.error('Synchronisierung:', e.code || e.name)), 15000);
-const server = createServer((req, res) => {
-  const healthy = retired || client.isReady();
-  res.writeHead(req.url === '/health' && healthy ? 200 : 503, { 'Content-Type': 'application/json' });
-  res.end(JSON.stringify({ ready: !retired && client.isReady() }));
-});
+const server = createServer((req, res) => { res.writeHead(req.url === '/health' && client.isReady() ? 200 : 503, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ ready: client.isReady() })); });
 server.listen(Number(env.PORT || 8080), '0.0.0.0');
-function retire() {
-  if (retired) return;
-  retired = true;
-  clearInterval(timer);
-  clearInterval(expiryCheck);
-  client.destroy();
-  store.db.close();
-  console.log('Farmboti permanently disconnected from Discord at scheduled cutoff.');
-  // Keep the health server alive so Railway does not repeatedly restart the process.
-}
-const expiryCheck = setInterval(() => {
-  if (Date.now() >= SHUTDOWN_AT) retire();
-}, 1000);
-for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => {
-  clearInterval(timer);
-  clearInterval(expiryCheck);
-  client.destroy();
-  server.close();
-  if (!retired) store.db.close();
-  process.exit(0);
-});
-if (retired) {
-  clearInterval(timer);
-  clearInterval(expiryCheck);
-  store.db.close();
-  console.log('Scheduled cutoff reached. Discord login disabled permanently.');
-} else {
-  client.login(env.DISCORD_TOKEN).then(() => {
-    if (Date.now() >= SHUTDOWN_AT) retire();
-  }).catch(e => {
-    console.error('Discord Anmeldung fehlgeschlagen:', e.code || e.name);
-    clearInterval(timer);
-    clearInterval(expiryCheck);
-    server.close();
-    process.exitCode = 1;
-    client.destroy();
-  });
-}
+for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => { clearInterval(timer); client.destroy(); server.close(); store.db.close(); process.exit(0); });
+client.login(env.DISCORD_TOKEN).catch(e => { console.error('Discord Anmeldung fehlgeschlagen:', e.code || e.name); clearInterval(timer); server.close(); process.exitCode = 1; client.destroy(); });
