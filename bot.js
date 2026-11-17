@@ -32,6 +32,15 @@ const commands = [
   { name: 'stornieren', description: 'Auftrag ohne aktive Reservierungen schließen · nur Shopteam', options: [option('id', 'Vollständige Auftrags ID aus dem Auftrag', 3, true)] }
 ].map(c => ({ ...c, dm_permission: false, default_member_permissions: ['auftrag', 'panel', 'pruefen', 'stornieren'].includes(c.name) ? '0' : null }));
 
+function isFinished(o) {
+  // A cancelled order or an entirely delivered and paid order is finished.
+  return o.cancelled || (
+    o.claims.some(c => c.status === 'paid') &&
+    o.claims.every(c => c.status === 'paid' || c.status === 'released') &&
+    remaining(o) === 0
+  );
+}
+
 function orderPayload(o) {
   const open = remaining(o), total = o.dk * o.price;
   const embed = new EmbedBuilder().setColor(o.cancelled ? 0x747f8d : 0x3ba55c).setTitle(`🌾 ${o.dk} DK ${safe(o.item)} gesucht`)
@@ -57,6 +66,21 @@ async function sync() {
     for (const o of store.all().filter(o => o.dirty)) {
       try {
         const snapshot = JSON.stringify(o);
+        if (isFinished(o)) {
+          if (o.message) {
+            try {
+              await channel.messages.delete(o.message);
+            } catch (error) {
+              // Message was already deleted by a moderator or another process.
+              if (error.code !== 10008) throw error;
+            }
+          }
+          const latest = store.get(o.id);
+          latest.message = null;
+          latest.dirty = JSON.stringify(store.get(o.id)) !== snapshot;
+          store.put(latest);
+          continue;
+        }
         const payload = orderPayload(o);
         if (o.message) await channel.messages.edit(o.message, payload);
         else {
